@@ -350,19 +350,6 @@ class WP_Test_JSON_Posts_Controller extends WP_Test_JSON_Post_Type_Controller_Te
 		$this->assertEquals( 'draft', $new_post->post_status );
 	}
 
-	public function test_create_post_invalid_type() {
-		wp_set_current_user( $this->editor_id );
-
-		$request = new WP_JSON_Request( 'POST', '/wp/posts' );
-		$params = $this->set_post_data( array(
-			'type' => 'testposttype',
-		) );
-		$request->set_body_params( $params );
-		$response = $this->server->dispatch( $request );
-
-		$this->assertErrorResponse( 'json_invalid_post_type', $response, 400 );
-	}
-
 	public function test_create_post_with_format() {
 		wp_set_current_user( $this->editor_id );
 
@@ -623,19 +610,6 @@ class WP_Test_JSON_Posts_Controller extends WP_Test_JSON_Post_Type_Controller_Te
 		$this->assertErrorResponse( 'json_post_invalid_id', $response, 400 );
 	}
 
-	public function test_update_post_change_type() {
-		wp_set_current_user( $this->editor_id );
-
-		$request = new WP_JSON_Request( 'PUT', sprintf( '/wp/posts/%d', $this->post_id ) );
-		$params = $this->set_post_data( array(
-			'type'  => 'foo',
-		) );
-		$request->set_body_params( $params );
-		$response = $this->server->dispatch( $request );
-
-		$this->assertErrorResponse( 'json_cannot_change_post_type', $response, 400 );
-	}
-
 	public function test_update_post_with_format() {
 		wp_set_current_user( $this->editor_id );
 
@@ -674,6 +648,19 @@ class WP_Test_JSON_Posts_Controller extends WP_Test_JSON_Post_Type_Controller_Te
 		$request = new WP_JSON_Request( 'PUT', sprintf( '/wp/posts/%d', $this->post_id ) );
 		$params = $this->set_post_data( array(
 			'sticky' => true,
+		) );
+		$request->set_body_params( $params );
+		$response = $this->server->dispatch( $request );
+
+		$new_data = $response->get_data();
+		$this->assertEquals( true, $new_data['sticky'] );
+		$post = get_post( $new_data['id'] );
+		$this->assertEquals( true, is_sticky( $post->ID ) );
+
+		// Updating another field shouldn't change sticky status
+		$request = new WP_JSON_Request( 'PUT', sprintf( '/wp/posts/%d', $this->post_id ) );
+		$params = $this->set_post_data( array(
+			'title'       => 'This should not reset sticky',
 		) );
 		$request->set_body_params( $params );
 		$response = $this->server->dispatch( $request );
@@ -781,13 +768,14 @@ class WP_Test_JSON_Posts_Controller extends WP_Test_JSON_Post_Type_Controller_Te
 		$response = $this->server->dispatch( $request );
 		$data = $response->get_data();
 		$properties = $data['properties'];
-		$this->assertEquals( 15, count( $properties ) );
+		$this->assertEquals( 16, count( $properties ) );
 		$this->assertArrayHasKey( 'author', $properties );
 		$this->assertArrayHasKey( 'comment_status', $properties );
 		$this->assertArrayHasKey( 'content', $properties );
 		$this->assertArrayHasKey( 'date', $properties );
 		$this->assertArrayHasKey( 'excerpt', $properties );
 		$this->assertArrayHasKey( 'featured_image', $properties );
+		$this->assertArrayHasKey( 'guid', $properties );
 		$this->assertArrayHasKey( 'format', $properties );
 		$this->assertArrayHasKey( 'id', $properties );
 		$this->assertArrayHasKey( 'link', $properties );
