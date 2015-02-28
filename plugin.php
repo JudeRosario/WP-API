@@ -31,13 +31,12 @@ include_once( dirname( __FILE__ ) . '/lib/infrastructure/class-wp-http-response.
 include_once( dirname( __FILE__ ) . '/lib/infrastructure/class-wp-json-response.php' );
 require_once( dirname( __FILE__ ) . '/lib/infrastructure/class-wp-json-request.php' );
 
-include_once( dirname( __FILE__ ) . '/lib/endpoints/class-wp-json-posts.php' );
-include_once( dirname( __FILE__ ) . '/lib/endpoints/class-wp-json-media.php' );
 include_once( dirname( __FILE__ ) . '/lib/endpoints/class-wp-json-meta.php' );
 include_once( dirname( __FILE__ ) . '/lib/endpoints/class-wp-json-meta-posts.php' );
 
 require_once dirname( __FILE__ ) . '/lib/endpoints/class-wp-json-controller.php';
 require_once dirname( __FILE__ ) . '/lib/endpoints/class-wp-json-posts-controller.php';
+require_once dirname( __FILE__ ) . '/lib/endpoints/class-wp-json-attachments-controller.php';
 require_once dirname( __FILE__ ) . '/lib/endpoints/class-wp-json-post-types-controller.php';
 require_once dirname( __FILE__ ) . '/lib/endpoints/class-wp-json-taxonomies-controller.php';
 require_once dirname( __FILE__ ) . '/lib/endpoints/class-wp-json-terms-controller.php';
@@ -91,9 +90,9 @@ function _add_extra_api_post_type_arguments() {
 	$wp_post_types['page']->json_base = 'pages';
 	$wp_post_types['page']->json_controller_class = 'WP_JSON_Posts_Controller';
 
-	// $wp_post_types['attachment']->show_in_json = true;
-	// $wp_post_types['attachment']->json_base = 'media';
-	// $wp_post_types['attachment']->json_controller_class = 'WP_JSON_Attachments_Controller';
+	$wp_post_types['attachment']->show_in_json = true;
+	$wp_post_types['attachment']->json_base = 'media';
+	$wp_post_types['attachment']->json_controller_class = 'WP_JSON_Attachments_Controller';
 
 }
 add_action( 'init', '_add_extra_api_post_type_arguments', 11 );
@@ -209,6 +208,10 @@ function create_initial_json_routes() {
 			'post_type'          => array(),
 		),
 	) );
+	register_json_route( 'wp', '/taxonomies/schema', array(
+		'methods'         => WP_JSON_Server::READABLE,
+		'callback'        => array( $controller, 'get_item_schema' ),
+	) );
 	register_json_route( 'wp', '/taxonomies/(?P<taxonomy>[\w-]+)', array(
 		'methods'         => WP_JSON_Server::READABLE,
 		'callback'        => array( $controller, 'get_item' ),
@@ -239,7 +242,7 @@ function create_initial_json_routes() {
 				),
 				'description' => array(),
 				'slug'        => array(),
-				'parent_id'   => array(),
+				'parent'      => array(),
 			),
 		),
 	));
@@ -255,7 +258,7 @@ function create_initial_json_routes() {
 				'name'           => array(),
 				'description'    => array(),
 				'slug'           => array(),
-				'parent_id'      => array(),
+				'parent'         => array(),
 			),
 		),
 		array(
@@ -363,11 +366,12 @@ function create_initial_json_routes() {
 		array(
 			'methods'   => WP_JSON_Server::READABLE,
 			'callback'  => array( $controller, 'get_items' ),
+			'permission_callback' => array( $controller, 'get_items_permissions_check' ),
 			'args'      => array(
-				'post_id'      => array(
+				'post'         => array(
 					'default'      => null,
 				),
-				'user_id'      => array(
+				'user'         => array(
 					'default'      => 0,
 				),
 				'per_page'     => array(
@@ -382,7 +386,7 @@ function create_initial_json_routes() {
 				'type'         => array(
 					'default'      => 'comment',
 				),
-				'parent_id'    => array(),
+				'parent'       => array(),
 				'search'       => array(),
 				'order'        => array(
 					'default'      => 'DESC',
@@ -402,17 +406,18 @@ function create_initial_json_routes() {
 		array(
 			'methods'  => WP_JSON_Server::CREATABLE,
 			'callback' => array( $controller, 'create_item' ),
+			'permission_callback' => array( $controller, 'create_item_permissions_check' ),
 			'args'     => array(
-				'post_id'      => array(
+				'post'         => array(
 					'required'     => true,
 				),
 				'type'         => array(
 					'default'      => 'comment',
 				),
-				'user_id'      => array(
+				'user'         => array(
 					'default'      => 0,
 				),
-				'parent_id'    => array(
+				'parent'       => array(
 					'default'      => 0,
 				),
 				'content'      => array(),
@@ -429,6 +434,7 @@ function create_initial_json_routes() {
 		array(
 			'methods'  => WP_JSON_Server::READABLE,
 			'callback' => array( $controller, 'get_item' ),
+			'permission_callback' => array( $controller, 'get_item_permissions_check' ),
 			'args'     => array(
 				'context'  => array(
 					'default'  => 'view',
@@ -438,8 +444,9 @@ function create_initial_json_routes() {
 		array(
 			'methods'  => WP_JSON_Server::EDITABLE,
 			'callback' => array( $controller, 'update_item' ),
+			'permission_callback' => array( $controller, 'update_item_permissions_check' ),
 			'args'     => array(
-				'post_id'      => array(),
+				'post'         => array(),
 				'status'       => array(),
 				'content'      => array(),
 				'author'       => array(),
@@ -451,6 +458,7 @@ function create_initial_json_routes() {
 		array(
 			'methods'  => WP_JSON_Server::DELETABLE,
 			'callback' => array( $controller, 'delete_item' ),
+			'permission_callback' => array( $controller, 'delete_item_permissions_check' ),
 			'args'     => array(
 				'force'    => array(),
 			),
@@ -513,26 +521,12 @@ add_action( 'init', 'json_api_maybe_flush_rewrites', 999 );
  * @param WP_JSON_Server $server Server object.
  */
 function json_api_default_filters( $server ) {
-	global $wp_json_posts, $wp_json_pages, $wp_json_media, $wp_json_taxonomies;
-
-	// Posts.
-	$wp_json_posts = new WP_JSON_Posts();
-	add_filter( 'json_endpoints', array( $wp_json_posts, 'register_routes' ), 0 );
-	add_filter( 'json_prepare_taxonomy', array( $wp_json_posts, 'add_post_type_data' ), 10, 3 );
 
 	// Post meta.
 	$wp_json_post_meta = new WP_JSON_Meta_Posts();
 	add_filter( 'json_endpoints',    array( $wp_json_post_meta, 'register_routes'    ), 0 );
 	add_filter( 'json_prepare_post', array( $wp_json_post_meta, 'add_post_meta_data' ), 10, 3 );
 	add_filter( 'json_insert_post',  array( $wp_json_post_meta, 'insert_post_meta'   ), 10, 2 );
-
-	// Media.
-	$wp_json_media = new WP_JSON_Media();
-	add_filter( 'json_endpoints',       array( $wp_json_media, 'register_routes'    ), 1     );
-	add_filter( 'json_prepare_post',    array( $wp_json_media, 'add_thumbnail_data' ), 10, 3 );
-	add_filter( 'json_pre_insert_post', array( $wp_json_media, 'preinsert_check'    ), 10, 3 );
-	add_filter( 'json_insert_post',     array( $wp_json_media, 'attach_thumbnail'   ), 10, 3 );
-	add_filter( 'json_post_type_data',  array( $wp_json_media, 'type_archive_link'  ), 10, 2 );
 
 	// Deprecated reporting.
 	add_action( 'deprecated_function_run',           'json_handle_deprecated_function', 10, 3 );
@@ -541,7 +535,7 @@ function json_api_default_filters( $server ) {
 	add_filter( 'deprecated_argument_trigger_error', '__return_false'                         );
 
 	// Default serving
-	add_filter( 'json_serve_request', 'json_send_cors_headers'             );
+	add_filter( 'json_pre_serve_request', 'json_send_cors_headers' );
 	add_filter( 'json_post_dispatch',  'json_send_allow_header', 10, 3 );
 
 	add_filter( 'json_pre_dispatch',  'json_handle_options_request', 10, 3 );
